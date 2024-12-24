@@ -49,8 +49,8 @@ namespace Copier
             }
         }
 
-        private ConcurrentQueue<CopyFile> files = [];
-        private List<CopyFile> filesCopied = [];
+        private ConcurrentQueue<CopyFile> Allfiles = [];
+        private List<string> filesCopied = [];
 
         private ObservableCollection<CopyFile> doneAndCopyFiles = [];
         public ObservableCollection<CopyFile> DoneAndCopyFiles 
@@ -146,7 +146,7 @@ namespace Copier
                         FileName = fileInfo.Name,
                         TotalBytes = fileInfo.Length
                     };
-                    this.files.Enqueue(fileCopy);
+                    Allfiles.Enqueue(fileCopy);
                 }
                 Task[] tasks = new Task[MaxDegreeOfParallelism];
                 for (int i = 0; i < MaxDegreeOfParallelism; i++)
@@ -168,23 +168,28 @@ namespace Copier
             finally
             {
                 totalBytes = 0;
+                DoneAndCopyFiles.Clear();
                 RaisePropertyChanged(nameof(TotalProgress));
+                Allfiles.Clear();
+                filesCopied.Clear();
             }
         }
 
         private async Task CopyFileAsync(CancellationToken token)
         {
-            while (files.TryDequeue(out CopyFile? fileCopy))
+            while (Allfiles.TryDequeue(out CopyFile? fileCopy))
             {
+                token.ThrowIfCancellationRequested();
+                fileCopy.FileState = FileState.Copy;
+                var destinationFile = Path.Combine(DestinationDirectory, fileCopy.FileName);
                 lock (_locker)
                 {
                     synchronizationContext.Post(_ =>
                     {
+                        filesCopied.Add(destinationFile);
                         DoneAndCopyFiles.Add(fileCopy);
                     }, null);
                 }
-                fileCopy.FileState = FileState.Copy;
-                var destinationFile = Path.Combine(DestinationDirectory, fileCopy.FileName);
                 using FileStream sourceStream = new FileStream(fileCopy.FilePath, FileMode.Open, FileAccess.Read);
                 using FileStream destinationStream = new FileStream(destinationFile, FileMode.Create, FileAccess.Write);
                 byte[] buffer = new byte[4096];
@@ -192,6 +197,18 @@ namespace Copier
 
                 while ((readBytes = await sourceStream.ReadAsync(buffer, 0, buffer.Length, CancellationToken.None)) > 0)
                 {
+                    if (token.IsCancellationRequested)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        synchronizationContext.Post(_ =>
+                        {
+                            lock (_locker)
+                            {
+                                DoneAndCopyFiles.Remove(fileCopy);
+                            }
+                        }, null);
+                        RaisePropertyChanged(nameof(DoneAndCopyFiles));
+                    }
                     await destinationStream.WriteAsync(buffer, 0, readBytes, CancellationToken.None);
                     fileCopy.BytesCopied += readBytes;
                     bytesCopied += readBytes;
@@ -201,18 +218,10 @@ namespace Copier
                 }
                 fileCopy.FileState = FileState.Done;
                 
-                    synchronizationContext.Post(_ =>
+                synchronizationContext.Post(_ =>
                     {
-                        if (!token.IsCancellationRequested)
-                        {
-                            lock (_locker)
-                            {
-                                filesCopied.Add(fileCopy);
-                            }
-                        }
-                        token.ThrowIfCancellationRequested();
                         lock (_locker)
-                        {
+                        {                            
                             DoneAndCopyFiles.Remove(fileCopy);
                         }
                     }, null);                
@@ -225,11 +234,11 @@ namespace Copier
             {
                 try
                 {
-                    File.Delete(file.FilePath);
+                    File.Delete(file);
                 }
                 catch
                 {
-                    // Ignore errors during cleanup
+                    MessageBox.Show(file);
                 }
             }
         }
