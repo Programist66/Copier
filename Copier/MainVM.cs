@@ -119,7 +119,6 @@ namespace Copier
         {
             isCopied = true;
             await CopyFilesAsync();
-            StartCopyOrCancelCommand = new DelegateCommand(StartCopy);
             MessageBox.Show("Копирование завершено");
             isCopied = false;
         }
