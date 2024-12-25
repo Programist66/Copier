@@ -56,7 +56,7 @@ namespace Copier
         public ObservableCollection<CopyFile> DoneAndCopyFiles 
         {
             get => doneAndCopyFiles; 
-            set => SetProperty(ref doneAndCopyFiles, value); 
+            //set => SetProperty(ref doneAndCopyFiles, value); 
         }
         public double TotalProgress 
         {
